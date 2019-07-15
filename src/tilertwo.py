@@ -4,57 +4,99 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import time
 from urllib.parse import urlparse
+from urllib.request import urlretrieve
 
 
 class CommandError(RuntimeError):
     pass
 
 
+# BEGIN INPUT HANDLERS
+# Take an <input_uri> to a geojson file and copy it to local dir <dest>
 def file_import_handler(input_uri, dest):
     copy_cmd = ["cp", input_uri.path, dest]
     subprocess.run(copy_cmd, check=True)
     print("Copied {} to: {}".format(input_uri.path, dest))
 
 
-VALID_INPUT_SCHEMES = set(("file",))
+def https_import_handler(input_uri, dest):
+    url = input_uri.geturl()
+    urlretrieve(url, dest)
+    print("Copied {} to: {}".format(url, dest))
+
+
+def s3_import_handler(input_uri, dest):
+    url = input_uri.geturl()
+    s3_cmd = ["aws", "s3", "cp", url, dest]
+    subprocess.run(s3_cmd, check=True)
+    print("Copied {} to: {}".format(url, dest))
+
+
+VALID_INPUT_SCHEMES = set(("file", "https", "s3"))
 import_handlers = {
-    "file": file_import_handler
+    "file": file_import_handler,
+    "https": https_import_handler,
+    "s3": s3_import_handler,
 }
 if set(import_handlers.keys()) != VALID_INPUT_SCHEMES:
     raise CommandError("Must implement import handler for each input scheme: {}"
                        .format(VALID_INPUT_SCHEMES))
 
 
+# BEGIN EXPORT HANDLERS
+# Take a <static_tiles_dir> and recursively copy to to <output_uri> path
 def file_export_handler(static_tiles_dir, output_uri):
     copy_cmd = ["cp", "-r", static_tiles_dir, output_uri.path]
     subprocess.run(copy_cmd, check=True)
     print("Copied static tiles to: {}".format(output_uri.path))
 
 
-VALID_OUTPUT_SCHEMES = set(("file",))
+def s3_export_handler(static_tiles_dir, output_uri):
+    url = output_uri.geturl()
+    s3_cmd = ["aws", "s3", "cp",
+              static_tiles_dir, url,
+              "--recursive",
+              "--quiet",
+              "--acl", "public-read",
+              "--content-encoding", "gzip"]
+    subprocess.run(s3_cmd, check=True)
+    print("Copied static tiles to: {}".format(url))
+
+
+VALID_OUTPUT_SCHEMES = set(("file", "s3"))
 export_handlers = {
-    "file": file_export_handler
+    "file": file_export_handler,
+    "s3": s3_export_handler,
 }
 if set(export_handlers.keys()) != VALID_OUTPUT_SCHEMES:
     raise CommandError("Must implement export handler for each input scheme: {}"
                        .format(VALID_OUTPUT_SCHEMES))
 
 
+# BEGIN MAIN
 def main():
 
-    parser = argparse.ArgumentParser(description="Generate vector tile pyramids from GeoJson")
+    parser = argparse.ArgumentParser(description="Generate vector tile pyramids from GeoJson. " +
+                                                 "If you're using the s3 scheme, be sure that " +
+                                                 "the correct AWS_PROFILE is set in your " +
+                                                 "environment.")
     parser.add_argument("geojson_file_path",
                         help="Path to geojson file to process. It should include the scheme, " +
-                             "such as file:///absolute/path/to.geojson. Supports schemes: "
+                             "such as file:///absolute/path/to.geojson. Supports schemes: {}"
                              .format(VALID_INPUT_SCHEMES))
     parser.add_argument("output_path",
                         help="Path to output directory, where mbtiles or mvts will be " +
                              "placed. It should include the scheme, such as " +
                              "file:///absolute/path/to/tiles. Supports schemes: {}."
                              .format(VALID_OUTPUT_SCHEMES))
+    parser.add_argument("--copy-mbtiles", action="store_true",
+                        help="If provided, copy the generated mbtiles file to " +
+                             "/data/source-<timestamp>.mbtiles`.")
     parser.add_argument("--skip-export", action="store_true",
-                        help="If provided, skip tile export and just run Tippecanoe.")
+                        help="If provided, skip tile export and just run Tippecanoe. If you " +
+                             "use this option, you likely want --copy-mbtiles as well.")
     parser.add_argument("--tippecanoe-opts", default="-zg --drop-densest-as-needed",
                         help="Arguments to pass to Tippecanoe CLI call.")
     parser.add_argument("-t", "--tmp", default="/tmp",
@@ -71,7 +113,7 @@ def main():
         if output_uri.scheme not in VALID_OUTPUT_SCHEMES:
             raise CommandError("output_path must be one of {}".format(VALID_OUTPUT_SCHEMES))
 
-        if os.path.splitext(input_uri.path)[1] != ".geojson":
+        if os.path.splitext(input_uri.path)[1] not in (".geojson", ".json"):
             raise CommandError("geojson_file_path must point to a .geojson file")
 
         print(args)
@@ -81,21 +123,28 @@ def main():
         tippecanoe_output_file = os.path.join(temp_dir, "out.mbtiles")
         tippecanoe_cmd = ["tippecanoe",
                           "-o", tippecanoe_output_file,
+                          "-t", temp_dir,
                           *shlex.split(args.tippecanoe_opts),
                           tippecanoe_input_file]
         print(tippecanoe_cmd)
         subprocess.run(tippecanoe_cmd, check=True)
         print("tippecanoe wrote successfully to: {}".format(tippecanoe_output_file))
 
-        mbutil_output_dir = os.path.join(temp_dir, "static-tiles")
-        mbutil_cmd = ["mb-util",
-                      "--image_format=pbf",
-                      tippecanoe_output_file,
-                      mbutil_output_dir]
-        subprocess.run(mbutil_cmd, check=True)
-        print("mb-util wrote successfully to: {}".format(mbutil_output_dir))
-
-        export_handlers[output_uri.scheme](mbutil_output_dir, output_uri)
+        if args.copy_mbtiles:
+            data_path = os.path.join("/data", "source-{}.mbtiles".format(int(time.time())))
+            subprocess.run(["cp", tippecanoe_output_file, data_path], check=True)
+            print("Copied mbtiles file to: {}".format(data_path))
+        if not args.skip_export:
+            mbutil_output_dir = os.path.join(temp_dir, "static-tiles")
+            mbutil_cmd = ["mb-util",
+                          "--image_format=pbf",
+                          "--silent",
+                          tippecanoe_output_file,
+                          mbutil_output_dir]
+            print(mbutil_cmd)
+            subprocess.run(mbutil_cmd, check=True)
+            print("mb-util wrote successfully to: {}".format(mbutil_output_dir))
+            export_handlers[output_uri.scheme](mbutil_output_dir, output_uri)
 
     except subprocess.CalledProcessError as e:
         print("\nError: {} failed with returncode {}\n".format(e.cmd, e.returncode))

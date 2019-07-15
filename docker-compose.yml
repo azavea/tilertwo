@@ -4,3 +4,7 @@ services:
     build:
       context: "./src"
       dockerfile: Dockerfile
+    environment:
+      - AWS_PROFILE
+    volumes:
+      - $HOME/.aws:/home/tilertwo/.aws:ro

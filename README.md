@@ -9,9 +9,10 @@ combination of available [Tippecanoe](https://github.com/mapbox/tippecanoe) opti
 ### Just generate an mbtiles file using relative paths
 
 ```
-docker-compose run --rm -v $(pwd):/data tiler-two \
-    file://ne_110m_admin_0_countries.geojson \
-    file://tiles/ne_110m_admin_0_countries \
+docker-compose run --rm -v $(pwd)/sample-data:/data tiler-two \
+    file:///data/ne_110m_admin_0_countries.geojson \
+    file:///data/tiles/ne_110m_admin_0_countries \
+    --copy-mbtiles
     --skip-export
     --tippecanoe-opts "--drop-densest-as-needed -zg -f"
 ```
@@ -19,19 +20,10 @@ docker-compose run --rm -v $(pwd):/data tiler-two \
 ### Export tiles to S3 using absolute input path
 
 ```
-docker-compose run --rm -v $(pwd):/data tiler-two \
+docker-compose run --rm -v $(pwd)/sample-data:/data tiler-two \
     file:///data/ne_110m_admin_0_countries.geojson \
     s3://azavea-datahub/tiles/ne_110m_admin_0_countries \
     --tippecanoe-opts "--drop-densest-as-needed -zg -f"
-```
-
-### Export tiles to file path using custom Tippecanoe script
-
-```
-docker-compose run --rm -v $(pwd):/data tiler-two \
-    file:///data/ne_110m_admin_0_countries.geojson \
-    file://tiles/ne_110m_admin_0_countries  \
-    --tippecanoe-script "file://my_tippecanoe.sh"
 ```
 
 ## Environment Variables
@@ -39,6 +31,8 @@ docker-compose run --rm -v $(pwd):/data tiler-two \
 ### `AWS_PROFILE`
 
 If you're exporting tiles to S3, set this and mount your `~/.aws` directory to `/home/tilertwo/.aws` in the container.
+
+If you run the container with the included `docker-compose` script, the aws directory mount is handled for you.
 
 ### `TIPPECANOE_VERSION`
 
