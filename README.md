@@ -4,11 +4,17 @@ This repository contains a Docker image that can be used to take a GeoJson file 
 of line-delimited GeoJson and generate a static vector tile set from it, using almost any
 combination of available [Tippecanoe](https://github.com/mapbox/tippecanoe) options.
 
+First, ensure [Docker](https://www.docker.com/get-started) and [Docker Compose](https://docs.docker.com/compose/install/) 3.0+ are installed. Then build the container with:
+
+```bash
+docker-compose build
+```
+
 For complete documentation, run `docker-compose run --rm tiler-two --help`
 
 ## Examples
 
-### Just generate an mbtiles file using relative paths
+### Only generate an mbtiles file using relative paths
 
 The mbtiles file will be placed in the root of the mounted data volume.
 
