@@ -4,7 +4,6 @@ import shlex
 import shutil
 import subprocess
 import tempfile
-import time
 from urllib.parse import urlparse
 from urllib.request import urlretrieve
 
@@ -91,16 +90,23 @@ def main():
                              "placed. It should include the scheme, such as " +
                              "file:///absolute/path/to/tiles. Supports schemes: {}."
                              .format(VALID_OUTPUT_SCHEMES))
-    parser.add_argument("--copy-mbtiles", action="store_true",
-                        help="If provided, copy the generated mbtiles file to " +
-                             "/data/source-<timestamp>.mbtiles`.")
-    parser.add_argument("--skip-export", action="store_true",
+    parser.add_argument("-n", "--no-clean", action="store_true",
+                        help="If provided, the temporary working dir specified by --tmp will not " +
+                             "be automatically deleted. This is useful if you want to retrieve " +
+                             "intermediate files such as the mbtiles. Remember to delete the " +
+                             "directory yourself.")
+    parser.add_argument("-s", "--skip-export", action="store_true",
                         help="If provided, skip tile export and just run Tippecanoe. If you " +
-                             "use this option, you likely want --copy-mbtiles as well.")
-    parser.add_argument("--tippecanoe-opts", default="-zg --drop-densest-as-needed",
-                        help="Arguments to pass to Tippecanoe CLI call.")
+                             "use this option with the Docker container, you likely want --tmp " +
+                             "and --no-clean as well.")
     parser.add_argument("-t", "--tmp", default="/tmp",
-                        help="Path to use for temporary working directory.")
+                        help="Path to use for temporary working directory. If you want to " +
+                             "retrieve the intermediate files from within the Docker container, " +
+                             "set this to `/data` and provide the --no-clean flag.")
+    parser.add_argument("--tippecanoe-opts", default="-zg --drop-densest-as-needed",
+                        help="Arguments to pass to Tippecanoe CLI call. TilerTwo will set " +
+                             "-o <output mbtiles> and the input geojson. Defaults to: " +
+                             "\"-zg --drop-densest-as-needed\".")
 
     args = parser.parse_args()
 
@@ -123,17 +129,12 @@ def main():
         tippecanoe_output_file = os.path.join(temp_dir, "out.mbtiles")
         tippecanoe_cmd = ["tippecanoe",
                           "-o", tippecanoe_output_file,
-                          "-t", temp_dir,
                           *shlex.split(args.tippecanoe_opts),
                           tippecanoe_input_file]
         print(tippecanoe_cmd)
         subprocess.run(tippecanoe_cmd, check=True)
         print("tippecanoe wrote successfully to: {}".format(tippecanoe_output_file))
 
-        if args.copy_mbtiles:
-            data_path = os.path.join("/data", "source-{}.mbtiles".format(int(time.time())))
-            subprocess.run(["cp", tippecanoe_output_file, data_path], check=True)
-            print("Copied mbtiles file to: {}".format(data_path))
         if not args.skip_export:
             mbutil_output_dir = os.path.join(temp_dir, "static-tiles")
             mbutil_cmd = ["mb-util",
@@ -151,7 +152,8 @@ def main():
     except CommandError as e:
         print("\nError: {}\n".format(e))
     finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        if not args.no_clean:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
