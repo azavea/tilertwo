@@ -4,6 +4,11 @@ This repository contains a Docker image that can be used to take a GeoJson file 
 of line-delimited GeoJson and generate a static vector tile set from it, using almost any
 combination of available [Tippecanoe](https://github.com/mapbox/tippecanoe) options.
 
+If you're not sure about which of the extensive Tippecanoe options to try first, a good default for most datasets is:
+```
+--drop-densest-as-needed -zg --hilbert
+```
+
 First, ensure [Docker](https://www.docker.com/get-started) and [Docker Compose](https://docs.docker.com/compose/install/) 3.0+ are installed. Then build the container with:
 
 ```bash
